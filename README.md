@@ -9,20 +9,27 @@ Yeni terminal aç:
 `python3 server.py 5000
 `
 
-Peer’i başlat
+3 ayrı terminal aç:
 
-Başka terminalde:
+Peer1:
 
-`python3 peer.py 127.0.0.1:5000
+`python3 peer.py 127.0.0.1:5000 peer1-repo example/peer1-schedule.txt 6001
 `
 
-Sunucu şöyle bir şey yazmalı:
+Peer2:
 
-`Server started on port 5000
+`python3 peer.py 127.0.0.1:5000 peer2-repo example/peer2-schedule.txt 6002
 `
 
-Peer terminalinde şöyle şeyler görürsün:
+Peer3:
 
+`python3 peer.py 127.0.0.1:5000 peer3-repo example/peer3-schedule.txt 6003
 `
-Peer hazır! Schedule okunuyor...
-Server cevabı: START PROVIDERS ...`
+
+Ne göreceksin?
+
+Her peer kendi portunda “Peer download server aktif...” diye yazar.
+
+Server terminalinde bağlantılar akar.
+
+Peer’ler sırayla dosya arar, paralel indirir, peer.log ve done dosyalarını oluşturur.
