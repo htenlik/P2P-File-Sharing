@@ -1,187 +1,260 @@
-import socket, threading, os, time
+# peer.py
+import socket
+import threading
+import sys
+import os
+import time
+from pathlib import Path
 
-END = b" END"
-CHUNK = 1024 * 1024  # 1MB okuma/yazma buffer
+END = b" END"  # sunucunun kullandığı sonlandırıcı ile birebir aynı olmalı
 
-# --------------------- yardımcı fonksiyonlar ---------------------
-
-def recv_until_end(conn):
-    """END kelimesine kadar tüm veriyi oku ve döndür."""
+# ---------- Yardımcılar ----------
+def recv_until_end(sock: socket.socket) -> str:
     buf = b""
     while END not in buf:
-        chunk = conn.recv(4096)
+        chunk = sock.recv(4096)
         if not chunk:
             break
         buf += chunk
-    return buf.decode()
+    return buf.decode().strip()
 
-def send_cmd(ip, port, text):
-    """Server veya peer'e komut gönder, cevap döndür."""
-    with socket.create_connection((ip, port)) as s:
-        s.sendall(text.encode())
-        reply = b""
-        while True:
-            part = s.recv(4096)
-            if not part:
-                break
-            reply += part
-            if b"END" in reply:
-                break
-        return reply.decode(errors="ignore")
+def send_cmd(ip: str, port: int, text: str) -> str:
+    """Sunucuya tek seferlik komut yolla, cevabı END'e kadar oku."""
+    s = socket.socket()
+    s.connect((ip, port))
+    s.sendall((text + " END").encode())
+    reply = recv_until_end(s)
+    s.close()
+    return reply
 
-# --------------------- server iletişimi ---------------------
+def log_line(repo_dir: Path, filename: str, ip_port: str):
+    """Her eklemede dosyayı aç-kapat (ödev koşulu)."""
+    with open(repo_dir.parent / "peer.log", "a", encoding="utf-8") as f:
+        f.write(f"{filename} {ip_port}\n")
 
-def register_to_server(server_ip, server_port, my_port, repo_dir):
-    """Server'a kendi portunu ve mevcut dosyaları bildir."""
-    # 1. SERVING
-    send_cmd(server_ip, server_port, f"START SERVING {my_port} END")
+def partition_ranges(total_size: int, k: int):
+    """[start, end] inclusive aralıkları k parçaya böl."""
+    # k sağlayıcıya olabildiğince eşit paylaştır
+    base = total_size // k
+    rem = total_size % k
+    ranges = []
+    start = 0
+    for i in range(k):
+        part = base + (1 if i < rem else 0)
+        end = start + part - 1
+        ranges.append((start, end))
+        start = end + 1
+    return ranges
 
-    # 2. PROVIDING (repo’daki tüm dosyalar)
-    files = [f for f in os.listdir(repo_dir) if os.path.isfile(os.path.join(repo_dir, f))]
-    if files:
-        send_cmd(server_ip, server_port,
-                 f"START PROVIDING {my_port} {len(files)} " + " ".join(files) + " END")
+def read_schedule(path: Path):
+    """schedule dosyasını oku: ('wait', ms) ve (name, size) girdeleri döndür."""
+    waits_ms = 0
+    jobs = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            if line.lower().startswith("wait"):
+                # ör: wait 500
+                parts = line.split()
+                if len(parts) >= 2 and parts[1].isdigit():
+                    waits_ms = int(parts[1])
+            else:
+                # ör: a.dat:00104857600
+                if ":" in line:
+                    name, size_str = line.split(":", 1)
+                    size = int(size_str)
+                    jobs.append((name.strip(), size))
+    return waits_ms, jobs
 
-# --------------------- dosya gönderici (sunucu) ---------------------
+def list_repo_files(repo_dir: Path):
+    """Repo içindeki mevcut dosya adlarını (sadece isim) döndür."""
+    if not repo_dir.exists():
+        return []
+    names = []
+    for p in repo_dir.iterdir():
+        if p.is_file():
+            names.append(p.name)
+    return names
 
-def serve_files(my_port, repo_dir):
-    """Diğer peer'lerin bizden dosya isteyebilmesi için sunucu başlat."""
-    def handle_peer(conn, addr):
+# ---------- Parça indirme işçisi ----------
+def download_part(worker_id: int, filename: str, dest_path: Path,
+                  provider_ip: str, provider_port: int,
+                  start_b: int, end_b: int, log_repo_dir: Path, banner: str):
+    size = end_b - start_b + 1
+    try:
+        s = socket.socket()
+        s.connect((provider_ip, provider_port))
+        cmd = f"START DOWNLOAD {filename} {start_b} {end_b}"
+        s.sendall((cmd + " END").encode())
+        # İkili veri geliyor; miktarı biliyoruz -> tam 'size' byte oku
+        remaining = size
+        with open(dest_path, "r+b") as out:
+            out.seek(start_b)
+            while remaining > 0:
+                chunk = s.recv(min(65536, remaining))
+                if not chunk:
+                    break
+                out.write(chunk)
+                remaining -= len(chunk)
+        s.close()
+        log_line(log_repo_dir, filename, f"{provider_ip}:{provider_port}")
+        print(f"{banner} {filename} parça [{start_b}-{end_b}] indirildi {provider_ip}:{provider_port}")
+    except Exception as e:
+        print(f"{banner} HATA: {filename} parça [{start_b}-{end_b}] {provider_ip}:{provider_port} -> {e}")
+
+# ---------- Peer'in indirme sunucusu ----------
+def serve_downloads(repo_dir: Path, peer_port: int, banner: str):
+    srv = socket.socket()
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("", peer_port))
+    srv.listen()
+    print(f"{banner} Peer download server aktif...")
+
+    def handler(conn: socket.socket, addr):
         try:
-            msg = recv_until_end(conn).strip()
-            tokens = msg.split()
-            if tokens[:2] == ["START", "DOWNLOAD"]:
-                fname, start, end = tokens[2], int(tokens[3]), int(tokens[4])
-                path = os.path.join(repo_dir, fname)
-                with open(path, "rb") as f:
-                    f.seek(start)
-                    remaining = end - start + 1
-                    while remaining > 0:
-                        chunk = f.read(min(CHUNK, remaining))
-                        if not chunk:
-                            break
-                        conn.sendall(chunk)
-                        remaining -= len(chunk)
+            msg = recv_until_end(conn)
+            toks = msg.split()
+            if toks[:2] == ["START", "DOWNLOAD"]:
+                filename = toks[2]
+                start_b = int(toks[3])
+                end_b = int(toks[4])
+                path = repo_dir / filename
+                data = b""
+                if path.exists():
+                    with open(path, "rb") as f:
+                        f.seek(start_b)
+                        to_read = end_b - start_b + 1
+                        data = f.read(to_read)
+                # ikili ham veri yolla
+                conn.sendall(data)
         except Exception as e:
-            print("Download error:", e)
+            # Sunucu tarafı sessiz hata toleransı
+            pass
         finally:
             conn.close()
 
-    s = socket.socket()
-    s.bind(("", my_port))
-    s.listen()
-    print(f"[{my_port}] Peer download server aktif...")
     while True:
-        conn, addr = s.accept()
-        threading.Thread(target=handle_peer, args=(conn, addr), daemon=True).start()
+        c, a = srv.accept()
+        threading.Thread(target=handler, args=(c, a), daemon=True).start()
 
-# --------------------- dosya indirme (client) ---------------------
+# ---------- Ana akış ----------
+def main():
+    if len(sys.argv) != 5:
+        print("Kullanım: python3 peer.py <ServerIP:Port> <RepoDir> <ScheduleFile> <PeerPort>")
+        sys.exit(1)
 
-def split_ranges(size, n):
-    """Dosyayı n parçaya böl, (start,end) listesi döndür."""
-    base = size // n
-    rem = size % n
-    cur = 0
-    ranges = []
-    for i in range(n):
-        inc = base + (1 if i < rem else 0)
-        ranges.append((cur, cur + inc - 1))
-        cur += inc
-    return ranges
+    server_addr = sys.argv[1]
+    repo_dir = Path(sys.argv[2]).resolve()
+    schedule_path = Path(sys.argv[3]).resolve()
+    peer_port = int(sys.argv[4])
 
-def download_part(peer_ip, peer_port, fname, start, end, outpath):
-    """Belirtilen aralıktaki dosya parçasını indir."""
+    server_ip, server_port = server_addr.split(":")
+    server_port = int(server_port)
+
+    banner = f"[{peer_port}]"
+
+    # İndirme sunucusunu başlat
+    t_srv = threading.Thread(target=serve_downloads, args=(repo_dir, peer_port, banner), daemon=True)
+    t_srv.start()
+
+    time.sleep(0.2)  # çok kısa bekleme, port dinlemeye başlasın
+
+    # Sunucuya SERVING bildir
     try:
-        with socket.create_connection((peer_ip, peer_port)) as s:
-            cmd = f"START DOWNLOAD {fname} {start} {end} END".encode()
-            s.sendall(cmd)
-            with open(outpath, "wb") as f:
-                remaining = end - start + 1
-                while remaining > 0:
-                    chunk = s.recv(min(CHUNK, remaining))
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    remaining -= len(chunk)
+        reply = send_cmd(server_ip, server_port, f"START SERVING {peer_port}")
+        print(f"{banner} Server’a kaydedildi.")
     except Exception as e:
-        print(f"Download part error from {peer_ip}:{peer_port}", e)
+        print(f"{banner} Sunucuya bağlanılamadı: {e}")
+        sys.exit(1)
 
-def combine_parts(part_files, final_path):
-    """İndirilen parça dosyalarını birleştir."""
-    with open(final_path, "wb") as out:
-        for p in part_files:
-            with open(p, "rb") as f:
-                while True:
-                    data = f.read(CHUNK)
-                    if not data:
-                        break
-                    out.write(data)
-            os.remove(p)
+    # Başlangıç PROVIDING (repo'daki mevcut dosyalar)
+    current_files = list_repo_files(repo_dir)
+    if current_files:
+        joined = " ".join(current_files)
+        cmd = f"START PROVIDING {peer_port} {len(current_files)} {joined}"
+        try:
+            _ = send_cmd(server_ip, server_port, cmd)
+        except Exception as e:
+            print(f"{banner} Başlangıç PROVIDING hatası: {e}")
 
-# --------------------- ana peer akışı ---------------------
+    # Schedule oku
+    wait_ms, jobs = read_schedule(schedule_path)
+    if wait_ms > 0:
+        time.sleep(wait_ms / 1000.0)
 
-def run_peer(server_ip, server_port, repo_dir, schedule_file, my_port):
-    # 1. kendi dosya sunucusunu arka planda başlat
-    threading.Thread(target=serve_files, args=(my_port, repo_dir), daemon=True).start()
-
-    # 2. server’a kendini bildir
-    register_to_server(server_ip, server_port, my_port, repo_dir)
-    print(f"[{my_port}] Server’a kaydedildi.")
-
-    # 3. schedule oku
-    with open(schedule_file) as f:
-        lines = [l.strip() for l in f if l.strip()]
-    wait_ms = int(lines[0].split()[1])
-    time.sleep(wait_ms / 1000)
-    targets = [l.split(":") for l in lines[1:]]  # [(dosya, boyut)]
-
-    for name, size_str in targets:
-        size = int(size_str)
-        print(f"[{my_port}] {name} dosyası aranıyor...")
-
-        # server'dan kimde olduğunu öğren
-        reply = send_cmd(server_ip, server_port, f"START SEARCH {name} END")
-        parts = reply.split("PROVIDERS", 1)[-1].rsplit("END", 1)[0].strip().split()
-        providers = [p.split(":") for p in parts if ":" in p]
-
-        if not providers:
-            print(f"[{my_port}] {name} bulunamadı!")
+    # Sırayla dosya ara/indir
+    for name, size in jobs:
+        print(f"{banner} {name} dosyası aranıyor...")
+        # Sağlayıcıları sor
+        try:
+            resp = send_cmd(server_ip, server_port, f"START SEARCH {name}")
+        except Exception as e:
+            print(f"{banner} Sunucu SEARCH hatası: {e}")
             continue
 
-        # paralel indirme
-        ranges = split_ranges(size, len(providers))
-        part_files = []
+        # Beklenen cevap: START PROVIDERS ip:port ip:port ... END
+        providers = []
+        toks = resp.split()
+        if toks[:2] == ["START", "PROVIDERS"]:
+            # geri kalanları ip:port biçiminde
+            for t in toks[2:-1]:
+                if ":" in t:
+                    ip, p = t.split(":")
+                    try:
+                        providers.append((ip, int(p)))
+                    except:
+                        pass
+
+        # Kendimizi ele
+        providers = [(ip, p) for (ip, p) in providers if p != peer_port]
+
+        if not providers:
+            print(f"{banner} {name} bulunamadı veya sağlayıcılar hazır değil!")
+            continue
+
+        # Hedef dosyayı repo'ya oluştur (pre-allocate)
+        dest = repo_dir / name
+        # Var ise üzerine yazacağız (yeniden indirilebilirlik)
+        with open(dest, "wb") as f:
+            if size > 0:
+                f.truncate(size)
+
+        # Aralıkları böl ve paralel indir
+        ranges = partition_ranges(size, len(providers))
         threads = []
-        for i, ((ip, p), (a, b)) in enumerate(zip(providers, ranges)):
-            outp = os.path.join(repo_dir, f".{name}.part{i}")
-            part_files.append(outp)
-            t = threading.Thread(target=download_part, args=(ip, int(p), name, a, b, outp))
-            t.start()
-            threads.append(t)
+        for (prov, rng) in zip(providers, ranges):
+            ip, p = prov
+            start_b, end_b = rng
+            th = threading.Thread(
+                target=download_part,
+                args=(p, name, dest, ip, p, start_b, end_b, repo_dir, banner),
+                daemon=True
+            )
+            th.start()
+            threads.append(th)
 
-        for t in threads: t.join()
+        for th in threads:
+            th.join()
 
-        final_path = os.path.join(repo_dir, name)
-        combine_parts(part_files, final_path)
-        print(f"[{my_port}] {name} indirildi ve birleştirildi ✅")
+        # Boyut doğrulaması
+        ok = dest.exists() and dest.stat().st_size == size
+        if not ok:
+            print(f"{banner} UYARI: {name} indirimi eksik olabilir (beklenen {size}, gerçek {dest.stat().st_size if dest.exists() else 0})")
+        else:
+            print(f"{banner} {name} indirildi.")
 
-        # server’a PROVIDING bildir
-        send_cmd(server_ip, server_port, f"START PROVIDING {my_port} 1 {name} END")
+        # Bu dosyayı PROVIDING ile duyur
+        try:
+            _ = send_cmd(server_ip, server_port, f"START PROVIDING {peer_port} 1 {name}")
+        except Exception as e:
+            print(f"{banner} PROVIDING (tekil) hatası: {e}")
 
-        # log’a yaz
-        with open("peer.log", "a") as logf:
-            logf.write(f"{name} {server_ip}:{server_port}\n")
-
-    open("done", "w").close()
-    print(f"[{my_port}] Tüm indirmeler tamamlandı. 'done' oluşturuldu.")
-
-# --------------------- çalıştırma noktası ---------------------
+    # Tümü tamamlandı -> done
+    with open("done", "w", encoding="utf-8") as f:
+        f.write("ok\n")
+    print(f"{banner} Tüm indirmeler tamamlandı. 'done' oluşturuldu.")
 
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) != 5:
-        print("Kullanım: python peer.py <ServerIP:Port> <RepoDir> <ScheduleFile> <MyPort>")
-        exit(1)
-
-    ip, port = sys.argv[1].split(":")
-    run_peer(ip, int(port), sys.argv[2], sys.argv[3], int(sys.argv[4]))
+    main()
