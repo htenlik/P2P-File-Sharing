@@ -81,15 +81,34 @@ def list_repo_files(repo_dir: Path):
 # ---------- Parça indirme işçisi ----------
 def download_part(worker_id: int, filename: str, dest_path: Path,
                   provider_ip: str, provider_port: int,
-                  start_b: int, end_b: int, log_repo_dir: Path, banner: str):
+                  start_b: int, end_b: int,
+                  log_repo_dir: Path, banner: str,
+                  results_dict: dict):
     size = end_b - start_b + 1
+
+    # küçük retry: sağlayıcı yeni açılmış olabilir
+    last_err = None
+    s = None
+    for attempt in range(8):  # ~4sn civarı
+        try:
+            s = socket.socket()
+            s.settimeout(2.0)
+            s.connect((provider_ip, provider_port))
+            break
+        except Exception as e:
+            last_err = e
+            time.sleep(0.5)
+    if s is None:
+        print(f"{banner} HATA: {filename} [{start_b}-{end_b}] {provider_ip}:{provider_port} -> {last_err}")
+        results_dict[(start_b, end_b)] = False
+        return
+
     try:
-        s = socket.socket()
-        s.connect((provider_ip, provider_port))
         cmd = f"START DOWNLOAD {filename} {start_b} {end_b}"
         s.sendall((cmd + " END").encode())
-        # İkili veri geliyor; miktarı biliyoruz -> tam 'size' byte oku
+
         remaining = size
+        received = 0
         with open(dest_path, "r+b") as out:
             out.seek(start_b)
             while remaining > 0:
@@ -97,12 +116,22 @@ def download_part(worker_id: int, filename: str, dest_path: Path,
                 if not chunk:
                     break
                 out.write(chunk)
+                received += len(chunk)
                 remaining -= len(chunk)
         s.close()
+
+        if received != size:
+            print(f"{banner} UYARI: {filename} [{start_b}-{end_b}] eksik alındı ({received}/{size}) {provider_ip}:{provider_port}")
+            results_dict[(start_b, end_b)] = False
+            return
+
         log_line(log_repo_dir, filename, f"{provider_ip}:{provider_port}")
         print(f"{banner} {filename} parça [{start_b}-{end_b}] indirildi {provider_ip}:{provider_port}")
+        results_dict[(start_b, end_b)] = True
+
     except Exception as e:
         print(f"{banner} HATA: {filename} parça [{start_b}-{end_b}] {provider_ip}:{provider_port} -> {e}")
+        results_dict[(start_b, end_b)] = False
 
 # ---------- Peer'in indirme sunucusu ----------
 def serve_downloads(repo_dir: Path, peer_port: int, banner: str):
@@ -120,17 +149,25 @@ def serve_downloads(repo_dir: Path, peer_port: int, banner: str):
                 filename = toks[2]
                 start_b = int(toks[3])
                 end_b = int(toks[4])
+                to_read = end_b - start_b + 1
                 path = repo_dir / filename
-                data = b""
+
+                sent = 0
                 if path.exists():
                     with open(path, "rb") as f:
                         f.seek(start_b)
-                        to_read = end_b - start_b + 1
-                        data = f.read(to_read)
-                # ikili ham veri yolla
-                conn.sendall(data)
-        except Exception as e:
-            # Sunucu tarafı sessiz hata toleransı
+                        while sent < to_read:
+                            need = min(65536, to_read - sent)
+                            data = f.read(need)
+                            if not data:
+                                break  # EOF
+                            conn.sendall(data)
+                            sent += len(data)
+
+                # EOF'tan sonra istenen byte sayısını tamamla (0'larla pad)
+                if sent < to_read:
+                    conn.sendall(b"\x00" * (to_read - sent))
+        except:
             pass
         finally:
             conn.close()
@@ -223,13 +260,15 @@ def main():
 
         # Aralıkları böl ve paralel indir
         ranges = partition_ranges(size, len(providers))
+
+        results = {}
         threads = []
         for (prov, rng) in zip(providers, ranges):
             ip, p = prov
             start_b, end_b = rng
             th = threading.Thread(
                 target=download_part,
-                args=(p, name, dest, ip, p, start_b, end_b, repo_dir, banner),
+                args=(p, name, dest, ip, p, start_b, end_b, repo_dir, banner, results),
                 daemon=True
             )
             th.start()
@@ -238,18 +277,19 @@ def main():
         for th in threads:
             th.join()
 
-        # Boyut doğrulaması
-        ok = dest.exists() and dest.stat().st_size == size
-        if not ok:
-            print(f"{banner} UYARI: {name} indirimi eksik olabilir (beklenen {size}, gerçek {dest.stat().st_size if dest.exists() else 0})")
+        all_ok = all(results.get(rng, False) for rng in ranges)
+
+        if not all_ok:
+            print(f"{banner} İNDİRME BAŞARISIZ: {name}. Dosya eksik/bozuk olabilir, PROVIDING yapılmadı.")
+            # İstersen başarısızda dosyayı sil:
+            # try: dest.unlink() except: pass
+            continue
         else:
             print(f"{banner} {name} indirildi.")
-
-        # Bu dosyayı PROVIDING ile duyur
-        try:
-            _ = send_cmd(server_ip, server_port, f"START PROVIDING {peer_port} 1 {name}")
-        except Exception as e:
-            print(f"{banner} PROVIDING (tekil) hatası: {e}")
+            try:
+                _ = send_cmd(server_ip, server_port, f"START PROVIDING {peer_port} 1 {name}")
+            except Exception as e:
+                print(f"{banner} PROVIDING (tekil) hatası: {e}")
 
     # Tümü tamamlandı -> done
     with open("done", "w", encoding="utf-8") as f:
