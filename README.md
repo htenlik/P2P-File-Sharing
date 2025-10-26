@@ -1,29 +1,10 @@
 # P2P-File-Sharing
  
-## Nasıl çalıştırılır?
+# Nasıl çalıştırılır?
 
 ## Dosyaları oluştur
-### Peer1
 
-`
-mkdir -p peer1-repo
-`
-
-`
-for x in a b c d; do echo "$x file" > peer1-repo/$x.dat; done
-`
-### Peer2
-`mkdir -p peer2-repo`
-
-`
-for x in c d e f; do echo "$x file" > peer2-repo/$x.dat; done
-`
-
-### Peer3
-`mkdir -p peer3-repo`
-
-`
-for x in e f g h; do echo "$x file" > peer3-repo/$x.dat; done
+`python3 create_test_data.py
 `
 
 ## Sunucuyu başlat
