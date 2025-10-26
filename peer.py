@@ -174,7 +174,7 @@ def serve_downloads(repo_dir: Path, peer_port: int, banner: str):
 
     while True:
         c, a = srv.accept()
-        threading.Thread(target=handler, args=(c, a), daemon=True).start()
+        threading.Thread(target=handler, args=(c, a)).start()
 
 # ---------- Ana akış ----------
 def main():
