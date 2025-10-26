@@ -59,4 +59,4 @@ def run_peer(server_ip, server_port, my_port, repo_dir, schedule_file):
 if __name__ == "__main__":
     import sys
     ip, port = sys.argv[1].split(":")
-    run_peer(ip, int(port), 6000, "./peer1-repo", "peer1-schedule.txt")
+    run_peer(ip, int(port), 6000, "./peer1-repo", "example/peer1-schedule.txt")
