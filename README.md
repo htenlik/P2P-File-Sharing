@@ -39,3 +39,11 @@ Server terminalinde bağlantılar akar.
 
 Peer’ler sırayla dosya arar, paralel indirir, peer.log ve done dosyalarını oluşturur.
 
+
+# server
+python3 P2PFileSharingServer.py 5001
+
+# peers 
+python3 P2PFileSharingPeer.py 127.0.0.1:5001 peer2-repo example/peer2-schedule.txt 6002
+python3 P2PFileSharingPeer.py 127.0.0.1:5001 peer3-repo example/peer3-schedule.txt 6003
+python3 P2PFileSharingPeer.py 127.0.0.1:5001 peer1-repo example/peer1-schedule.txt 6001
