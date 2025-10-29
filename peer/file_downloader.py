@@ -1,81 +1,100 @@
-import socket, threading, time
+import socket, threading
 from pathlib import Path
-from common.logger import append_peer_log
-from common.protocol import send_cmd
-from common.utils import partition_ranges
+from common.protocol import send_cmd, send_and_receive_cmd, Command
 
-def _download_part(banner, filename, dest_path: Path,
+
+def _download_part(idx: int, peer_port: int, filename, dest_path: Path,
                    provider_ip: str, provider_port: int,
-                   start_b: int, end_b: int, repo_dir: Path, results: dict):
+                   start_b: int, end_b: int, repo_dir: Path, results: list[bool]):
     size = end_b - start_b + 1
-    last_err, s = None, None
-    for _ in range(8):
-        try:
-            s = socket.socket(); s.settimeout(2.0)
-            s.connect((provider_ip, provider_port)); break
-        except Exception as e:
-            last_err = e; time.sleep(0.5)
-    if s is None:
-        print(f"{banner} HATA: {filename} [{start_b}-{end_b}] {provider_ip}:{provider_port} -> {last_err}")
-        results[(start_b, end_b)] = False; return
+    s = socket.socket()
+    s.settimeout(2.0)
     try:
-        s.sendall((f"START DOWNLOAD {filename} {start_b} {end_b} END").encode())
+        s.connect((provider_ip, provider_port))
+    except Exception as e:
+        print(f"PEER{peer_port} ConnectionFault Provider-> {provider_ip}:{provider_port} -> {e}")
+        s.close()
+        results[idx] = False
+        return
+    try:
+        send_cmd(s, Command.START_DOWNLOAD, filename, start_b, end_b)
         remaining, received = size, 0
-        with open(dest_path, "r+b") as out:
-            out.seek(start_b)
+        with open(dest_path, "r+b") as f:
+            f.seek(start_b)
             while remaining > 0:
                 chunk = s.recv(min(65536, remaining))
                 if not chunk: break
-                out.write(chunk)
+                f.write(chunk)
                 received += len(chunk)
                 remaining -= len(chunk)
         s.close()
+        """ is it necessary to check?
         if received != size:
-            print(f"{banner} UYARI: {filename} [{start_b}-{end_b}] eksik alındı ({received}/{size}) {provider_ip}:{provider_port}")
-            results[(start_b, end_b)] = False; return
+            results[idx] = False; return
+        """
         append_peer_log(repo_dir, filename, f"{provider_ip}:{provider_port}")
-        print(f"{banner} {filename} parça [{start_b}-{end_b}] indirildi {provider_ip}:{provider_port}")
-        results[(start_b, end_b)] = True
+        print(f"PEER{peer_port} {filename} part [{start_b}-{end_b}] downloaded from {provider_ip}:{provider_port}")
+        results[idx] = True
     except Exception as e:
-        print(f"{banner} HATA: {filename} parça [{start_b}-{end_b}] {provider_ip}:{provider_port} -> {e}")
-        results[(start_b, end_b)] = False
+        print(f"PEER{peer_port} HATA: {filename} part [{start_b}-{end_b}] {provider_ip}:{provider_port} -> {e}")
+        results[idx] = False
 
-def parallel_download(banner, server_ip, server_port, peer_port, repo_dir: Path, filename: str, size: int):
-    # providerları sor
-    resp = send_cmd(server_ip, server_port, f"START SEARCH {filename}")
+
+def parallel_download(server_ip, server_port, peer_port, repo_dir: Path, filename: str, size: int):
+    response = send_and_receive_cmd(server_ip, server_port, Command.START_SEARCH, filename)
     providers = []
-    toks = resp.split()
-    if toks[:2] == ["START", "PROVIDERS"]:
-        for t in toks[2:-1]:
-            if ":" in t:
-                ip, p = t.split(":")
-                try: providers.append((ip, int(p)))
-                except: pass
-    providers = [(ip, p) for (ip, p) in providers if p != peer_port]
+    tokens = response.split()
+    if tokens[:2] == ["START", "PROVIDERS"]:
+        for t in tokens[2:-1]:
+            ip, p = t.split(":")
+            providers.append((ip, int(p)))
     if not providers:
-        print(f"{banner} {filename} bulunamadı veya sağlayıcılar hazır değil!")
+        print(f"PEER{peer_port} no provider found for {filename}.")
         return False
 
     # pre-allocate
     dest = Path(repo_dir) / filename
     with open(dest, "wb") as f:
-        if size > 0: f.truncate(size)
+        f.truncate(size)
 
     ranges = partition_ranges(size, len(providers))
-    results, threads = {}, []
-    for (prov, rng) in zip(providers, ranges):
-        ip, p = prov; start_b, end_b = rng
-        t = threading.Thread(target=_download_part,
-                             args=(banner, filename, dest, ip, p, start_b, end_b, Path(repo_dir), results),
-                             daemon=True)
+    results = [False] * len(ranges)
+    threads = []
+    for idx, (provider, byte_range) in enumerate(zip(providers, ranges)):
+        ip, p = provider
+        start_b, end_b = byte_range
+        t = threading.Thread(
+            target=_download_part,
+            args=(idx, peer_port, filename, dest, ip, p, start_b, end_b, Path(repo_dir), results),
+            daemon=True,
+        )
         t.start(); threads.append(t)
     for t in threads: t.join()
-    ok = all(results.get(r, False) for r in ranges)
-    if ok:
-        print(f"{banner} {filename} indirildi.")
-        try: send_cmd(server_ip, server_port, f"START PROVIDING {peer_port} 1 {filename}")
+    all_parts_downloaded_successfully = all(results)
+    if all_parts_downloaded_successfully:
+        print(f"PEER{peer_port} {filename} has been downloaded.")
+        try:
+            send_and_receive_cmd(server_ip, server_port, Command.START_PROVIDING, peer_port, 1, filename)
         except Exception as e:
-            print(f"{banner} PROVIDING (tekil) hatası: {e}")
+            print(f"PEER{peer_port} PROVIDING error: {e}")
     else:
-        print(f"{banner} İNDİRME BAŞARISIZ: {filename}. Dosya eksik/bozuk olabilir, PROVIDING yapılmadı.")
-    return ok
+        print(
+            f"PEER{peer_port} DOWNLOAD FAILED: {filename}.")
+
+    return all_parts_downloaded_successfully
+
+
+def partition_ranges(total_size: int, k: int):
+    base = total_size // k
+    ranges = []
+    start = 0
+    for _ in range(k - 1):
+        end = start + base - 1
+        ranges.append((start, end))
+        start = end + 1
+    ranges.append((start, start + base + (total_size % k) - 1))
+    return ranges
+
+def append_peer_log(repo_dir: Path, filename: str, ip_port: str):
+    with open(repo_dir.parent / "peer.log", "a", encoding="utf-8") as f:
+        f.write(f"{filename} {ip_port}\n")

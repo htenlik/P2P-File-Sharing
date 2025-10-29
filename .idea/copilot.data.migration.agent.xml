@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AgentMigrationStateService">
+    <option name="migrationStatus" value="IN_PROGRESS" />
+    <option name="pendingSessionIds">
+      <option value="2233e57c-f0e4-4661-8973-6fee7f3b1d81" />
+      <option value="3a086462-aa56-48aa-8503-3e46f2a34c6e" />
+      <option value="7fb06fd0-9b96-47b1-bee9-1eef622e57d7" />
+      <option value="90ee3be8-19d9-46ea-82e8-2cd064019e01" />
+    </option>
+    <option name="pendingTurns">
+      <map>
+        <entry key="2233e57c-f0e4-4661-8973-6fee7f3b1d81">
+          <value>
+            <set>
+              <option value="8dfc400c-03d6-479d-9d56-b4e0dd48c873" />
+              <option value="7c02e7c7-acda-410f-9bfa-712b2ebbc204" />
+              <option value="1f22e738-6189-402c-8660-d26d46f4d976" />
+              <option value="b42aaec5-00c3-4b0f-8c7c-125954ebf670" />
+              <option value="12b4a2e8-8d00-4a1f-99ef-7fc0a0198a87" />
+              <option value="1213218a-09dd-4a1a-96d8-e27b42da3b75" />
+              <option value="8fa351a4-bdbe-4233-9fe0-6622e816e08c" />
+              <option value="9cac58cc-0c57-43e7-ba2c-32575862e61a" />
+              <option value="82d0a04f-233b-4825-9aca-761985c1c94d" />
+              <option value="8e81282b-c67c-4f57-910e-c17bce70e542" />
+              <option value="d5c964e9-6981-485e-b532-7c430c6ec543" />
+              <option value="01db41e8-e75a-4279-beb3-7e2b312c147c" />
+              <option value="32fd38d8-f81a-4eb4-bada-1cbce7fca8a5" />
+              <option value="b37ce507-a53c-418b-bb9e-f82ec8d1b414" />
+              <option value="e4670d23-0157-4188-81dc-fbda56fbee49" />
+              <option value="27c23936-9cb5-4e3c-838a-675f759faaa7" />
+              <option value="f1d79ce6-1ade-44eb-b6cf-bfa99499ebeb" />
+            </set>
+          </value>
+        </entry>
+        <entry key="7fb06fd0-9b96-47b1-bee9-1eef622e57d7">
+          <value>
+            <set>
+              <option value="4de10dea-530c-4ee3-b969-24d66fead941" />
+              <option value="a19ba25f-c29d-4c15-a68c-3bc80d5c13e7" />
+            </set>
+          </value>
+        </entry>
+        <entry key="90ee3be8-19d9-46ea-82e8-2cd064019e01">
+          <value>
+            <set>
+              <option value="78341ee9-c61e-4e0e-839b-6b5070599985" />
+              <option value="9ac5918f-b66b-4868-b52f-63e41c3a68d7" />
+            </set>
+          </value>
+        </entry>
+      </map>
+    </option>
+    <pendingWorkingSetItems>
+      <entry key="2233e57c-f0e4-4661-8973-6fee7f3b1d81">
+        <set>
+          <option value="file://$PROJECT_DIR$/server/peer_registry.py" />
+          <option value="file://$PROJECT_DIR$/server/request_handler.py" />
+          <option value="file://$PROJECT_DIR$/server/central_server.py" />
+          <option value="file://$PROJECT_DIR$/peer/peer_server.py" />
+          <option value="file://$PROJECT_DIR$/peer/file_downloader.py" />
+          <option value="file://$PROJECT_DIR$/common/protocol.py" />
+        </set>
+      </entry>
+      <entry key="7fb06fd0-9b96-47b1-bee9-1eef622e57d7">
+        <set>
+          <option value="file://$PROJECT_DIR$/peer/peer_server.py" />
+          <option value="file://$PROJECT_DIR$/peer/file_downloader.py" />
+          <option value="file://$PROJECT_DIR$/server/request_handler.py" />
+          <option value="file://$PROJECT_DIR$/P2PFileSharingPeer.py" />
+          <option value="file://$PROJECT_DIR$/P2PFileSharingServer.py" />
+        </set>
+      </entry>
+      <entry key="90ee3be8-19d9-46ea-82e8-2cd064019e01" />
+    </pendingWorkingSetItems>
+  </component>
+</project>

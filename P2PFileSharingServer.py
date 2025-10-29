@@ -1,4 +1,4 @@
-from server.central_server import CentralServer
+from server.file_search_server import CentralServer
 import sys
 
 def main():
@@ -6,8 +6,8 @@ def main():
         print("Usage: python3 P2PFileSharingServer.py <Port>")
         sys.exit(1)
     port = int(sys.argv[1])
-    srv = CentralServer(port)
-    srv.serve_forever()
+    server = CentralServer(port)
+    server.run()
 
 if __name__ == "__main__":
     main()

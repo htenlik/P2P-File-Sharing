@@ -1,4 +1,4 @@
-from peer.peer_node import PeerNode
+from peer.peer_server import PeerNode
 import sys
 
 def main():

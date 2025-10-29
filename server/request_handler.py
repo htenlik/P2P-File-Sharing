@@ -1,32 +1,28 @@
-import threading
-from common.protocol import recv_until_end
-from server.peer_registry import PeerRegistry
+from common.protocol import receive_msg, send_cmd, Command
 
-class RequestHandler(threading.Thread):
-    def __init__(self, conn, addr, registry: PeerRegistry):
-        super().__init__(daemon=True)
+class RequestHandler:
+    def __init__(self, conn, addr, registry):
         self.conn = conn
         self.addr = addr
-        self.r = registry
+        self.registry = registry
 
     def run(self):
         try:
-            msg = recv_until_end(self.conn).strip()
-            toks = msg.split()
-            if toks[:2] == ["START", "SERVING"]:
-                port = int(toks[2])
-                self.r.register_serving(self.addr[0], port)
-
-            elif toks[:2] == ["START", "PROVIDING"]:
-                port = int(toks[2]); n = int(toks[3])
-                names = toks[4:-1][:n]
-                self.r.register_providing(self.addr[0], port, names)
-
-            elif toks[:2] == ["START", "SEARCH"]:
-                name = toks[2]
-                peers = self.r.search(name)
-                lst = " ".join([f"{ip}:{p}" for (ip, p) in peers])
-                reply = f"START PROVIDERS {lst} END".encode()
-                self.conn.sendall(reply)
+            msg = receive_msg(self.conn).strip()
+            tokens = msg.split()
+            if tokens[:2] == ["START", "SERVING"]:
+                port = int(tokens[2])
+                self.registry.register_peer(self.addr[0], port)
+            elif tokens[:2] == ["STOP", "SERVING"]:
+                port = int(tokens[2])
+                self.registry.delete_peer(self.addr[0], port)
+            elif tokens[:2] == ["START", "PROVIDING"]:
+                port = int(tokens[2]); n = int(tokens[3])
+                names = tokens[4:-1][:n]
+                self.registry.register_providing(self.addr[0], port, names)
+            elif tokens[:2] == ["START", "SEARCH"]:
+                name = tokens[2]
+                peers = self.registry.search(name)
+                send_cmd(self.conn, Command.START_PROVIDERS, *[f"{ip}:{p}" for (ip, p) in peers])
         finally:
             self.conn.close()
