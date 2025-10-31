@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CopilotDiffPersistence">
+    <option name="pendingDiffs">
+      <map>
+        <entry key="$PROJECT_DIR$/P2PFileSharingServer.py">
+          <value>
+            <PendingDiffInfo>
+              <option name="filePath" value="$PROJECT_DIR$/P2PFileSharingServer.py" />
+              <option name="originalContent" value="from server.file_search_server import CentralServer&#10;import sys&#10;&#10;def main():&#10;    if len(sys.argv) != 2:&#10;        print(&quot;Usage: python3 P2PFileSharingServer.py &lt;Port&gt;&quot;)&#10;        sys.exit(1)&#10;    port = int(sys.argv[1])&#10;    server = CentralServer(port)&#10;    server.run()&#10;&#10;if __name__ == &quot;__main__&quot;:&#10;    main()&#10;" />
+              <option name="updatedContent" value="from server.file_search_server import CentralServer&#10;import sys&#10;&#10;def main():&#10;    if len(sys.argv) != 2:&#10;        print(&quot;Usage: python3 P2PFileSharingServer.py &lt;Port&gt;&quot;)&#10;        sys.exit(1)&#10;    port = int(sys.argv[1])&#10;    server = CentralServer(port)&#10;    server.run()&#10;&#10;if __name__ == &quot;__main__&quot;:&#10;    main()" />
+            </PendingDiffInfo>
+          </value>
+        </entry>
+        <entry key="$PROJECT_DIR$/server/request_handler.py">
+          <value>
+            <PendingDiffInfo>
+              <option name="filePath" value="$PROJECT_DIR$/server/request_handler.py" />
+              <option name="originalContent" value="from common.protocol import receive_msg, start_providers&#10;&#10;class RequestHandler:&#10;    def __init__(self, conn, addr, registry):&#10;        self.conn = conn&#10;        self.addr = addr&#10;        self.registry = registry&#10;&#10;    def run(self):&#10;        try:&#10;            msg = receive_msg(self.conn).strip()&#10;            tokens = msg.split()&#10;            if tokens[:2] == [&quot;START&quot;, &quot;SERVING&quot;]:&#10;                port = int(tokens[2])&#10;                self.registry.register_peer(self.addr[0], port)&#10;            elif tokens[:2] == [&quot;STOP&quot;, &quot;SERVING&quot;]:&#10;                port = int(tokens[2])&#10;                self.registry.delete_peer(self.addr[0], port)&#10;            elif tokens[:2] == [&quot;START&quot;, &quot;PROVIDING&quot;]:&#10;                port = int(tokens[2]); n = int(tokens[3])&#10;                names = tokens[4:-1][:n]&#10;                self.registry.register_providing(self.addr[0], port, names)&#10;            elif tokens[:2] == [&quot;START&quot;, &quot;SEARCH&quot;]:&#10;                name = tokens[2]&#10;                peers = self.registry.search(name)&#10;                start_providers(self.conn, [f&quot;{ip}:{p}&quot; for (ip, p) in peers])&#10;        finally:&#10;            self.conn.close()&#10;" />
+              <option name="updatedContent" value="from common.protocol import receive_msg, start_providers&#10;&#10;class RequestHandler:&#10;    def __init__(self, conn, addr, registry):&#10;        self.conn = conn&#10;        self.addr = addr&#10;        self.registry = registry&#10;&#10;    def run(self):&#10;        try:&#10;            msg = receive_msg(self.conn).strip()&#10;            tokens = msg.split()&#10;            if tokens[:2] == [&quot;START&quot;, &quot;SERVING&quot;]:&#10;                port = int(tokens[2])&#10;                self.registry.register_peer(self.addr[0], port)&#10;            elif tokens[:2] == [&quot;STOP&quot;, &quot;SERVING&quot;]:&#10;                port = int(tokens[2])&#10;                self.registry.delete_peer(self.addr[0], port)&#10;            elif tokens[:2] == [&quot;START&quot;, &quot;PROVIDING&quot;]:&#10;                port = int(tokens[2]); n = int(tokens[3])&#10;                names = tokens[4:-1][:n]&#10;                self.registry.register_providing(self.addr[0], port, names)&#10;            elif tokens[:2] == [&quot;START&quot;, &quot;SEARCH&quot;]:&#10;                name = tokens[2]&#10;                peers = self.registry.search(name)&#10;                start_providers(self.conn, [f&quot;{ip}:{p}&quot; for (ip, p) in peers])&#10;        finally:&#10;            self.conn.close()" />
+            </PendingDiffInfo>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>
